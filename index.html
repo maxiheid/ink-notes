@@ -222,7 +222,14 @@
   // Firebase-Konfiguration für die Synchronisation zwischen Geräten und Notion-Embeds
   // (Firebase-Konsole → Projekteinstellungen → Meine Apps → Web-App → firebaseConfig).
   // null = Notizen werden nur lokal in diesem Browser gespeichert.
-  const FIREBASE_CONFIG = null;
+  const FIREBASE_CONFIG = {
+    apiKey: 'AIzaSyAjd55MPkgp-t0g48a_ysxsLfJydGVlUf4',
+    authDomain: 'ink-notes-93986.firebaseapp.com',
+    projectId: 'ink-notes-93986',
+    storageBucket: 'ink-notes-93986.firebasestorage.app',
+    messagingSenderId: '276822658205',
+    appId: '1:276822658205:web:b6e2b2a7a271cf05069874',
+  };
 
   const PAGE_W = 1000, PAGE_H = 1414; // A4-Verhältnis, logische Einheiten
   const SIZES = { pen: [1.6, 3, 6], hl: [14, 24, 36], eraser: [12, 28, 60] };
