@@ -80,6 +80,7 @@
   .zoom { min-width: 42px; text-align: center; color: var(--muted); font-variant-numeric: tabular-nums; cursor: pointer; border: 0; background: none; font: inherit; }
   .pageind { flex: none; margin-left: auto; padding-left: 8px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 
+  .nbname { margin-right: 8px; max-width: 140px; overflow: hidden; text-overflow: ellipsis; display: inline-block; vertical-align: bottom; }
   .sync { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 8px; vertical-align: 1px; background: var(--muted); opacity: .5; }
   .sync[data-s="ok"] { background: #22a35a; opacity: 1; }
   .sync[data-s="saving"], .sync[data-s="offline"] { background: #e8a317; opacity: 1; }
@@ -178,7 +179,7 @@
   <div class="grp">
     <button class="tb" id="menuBtn" title="Mehr"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button>
   </div>
-  <span class="pageind"><span class="sync" id="sync" data-s="wait" title="Lädt …"></span><span id="pageInd">1 / 1</span></span>
+  <span class="pageind"><span class="nbname" id="nbName"></span><span class="sync" id="sync" data-s="wait" title="Lädt …"></span><span id="pageInd">1 / 1</span></span>
 </header>
 
 <div class="menu" id="menu" role="menu">
@@ -983,6 +984,8 @@
 
   // ---------- Start ----------
   buildToolUI(); updateHistoryBtns(); syncPages();
+  $('#nbName').textContent = NB_ID;
+  $('#nbName').title = `Notizbuch „${NB_ID}“ – gleiche ?id= im Link = gleiche Notizen`;
   backend.start().catch(err => {
     console.error(err);
     if (backend !== localBackend) { toast('Sync nicht erreichbar – nur lokal gespeichert'); backend = localBackend; localBackend.start(); }
