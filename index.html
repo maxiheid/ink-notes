@@ -80,6 +80,10 @@
   .zoom { min-width: 42px; text-align: center; color: var(--muted); font-variant-numeric: tabular-nums; cursor: pointer; border: 0; background: none; font: inherit; }
   .pageind { flex: none; margin-left: auto; padding-left: 8px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 
+  .sync { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 8px; vertical-align: 1px; background: var(--muted); opacity: .5; }
+  .sync[data-s="ok"] { background: #22a35a; opacity: 1; }
+  .sync[data-s="saving"], .sync[data-s="offline"] { background: #e8a317; opacity: 1; }
+  .sync[data-s="error"] { background: #d93025; opacity: 1; }
   #scroller { flex: 1; overflow: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
   #pages { width: max-content; min-width: 100%; padding: 12px 12px 40px; }
   .page {
@@ -176,7 +180,7 @@
     <button class="tb" id="penOnly" title="Nur Apple Pencil schreibt – mit zwei Fingern scrollen und zoomen"><svg viewBox="0 0 24 24"><path d="M18 11V6a2 2 0 0 0-4 0"/><path d="M14 10V4a2 2 0 0 0-4 0v2"/><path d="M10 10.5V6a2 2 0 0 0-4 0v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-6-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/></svg></button>
     <button class="tb" id="menuBtn" title="Mehr"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button>
   </div>
-  <span class="pageind" id="pageInd">1 / 1</span>
+  <span class="pageind"><span class="sync" id="sync" data-s="wait" title="Lädt …"></span><span id="pageInd">1 / 1</span></span>
 </header>
 
 <div class="menu" id="menu" role="menu">
@@ -215,6 +219,11 @@
 <script>
 (() => {
   'use strict';
+  // Firebase-Konfiguration für die Synchronisation zwischen Geräten und Notion-Embeds
+  // (Firebase-Konsole → Projekteinstellungen → Meine Apps → Web-App → firebaseConfig).
+  // null = Notizen werden nur lokal in diesem Browser gespeichert.
+  const FIREBASE_CONFIG = null;
+
   const PAGE_W = 1000, PAGE_H = 1414; // A4-Verhältnis, logische Einheiten
   const SIZES = { pen: [1.6, 3, 6], hl: [14, 24, 36], eraser: [12, 28, 60] };
   const PALETTE = {
@@ -265,43 +274,233 @@
     };
   })();
 
-  let state = { v: 1, pages: [newPage('lined')] };
-  function newPage(paper) { return { paper, strokes: [] }; }
+  // ---------- Datenmodell ----------
+  // state.pages = [{ id, paper, strokes: [{ id, tool, color, width, points }] }] ist, was angezeigt wird.
+  // canonMeta/canon ist der zuletzt gespeicherte bzw. synchronisierte Stand. Jede Änderung wird per
+  // commit() als Differenz (neue/gelöschte Striche, Seitenliste) gespeichert – so können mehrere Geräte
+  // gleichzeitig schreiben, ohne sich gegenseitig zu überschreiben.
+  const rid = n => Array.from(crypto.getRandomValues(new Uint8Array(n)), b => (b % 36).toString(36)).join('');
+  const strokeId = () => Date.now().toString(36).padStart(9, '0') + rid(4); // chronologisch sortierbar
+  const byId = (a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+  function newPage(paper) { return { id: rid(8), paper, strokes: [] }; }
 
-  let saveTimer = 0, dirty = false;
-  const channel = 'BroadcastChannel' in window ? new BroadcastChannel('inknotes:' + NB_ID) : null;
-  function scheduleSave() {
-    dirty = true; clearTimeout(saveTimer); saveTimer = setTimeout(saveNow, 400);
-  }
-  async function saveNow() {
-    clearTimeout(saveTimer);
-    if (!dirty) return;
-    dirty = false;
-    try { await store.set(KEY, state); channel?.postMessage('saved'); }
-    catch (err) { dirty = true; toast('Speichern fehlgeschlagen – bitte Backup exportieren'); console.error(err); }
-  }
-  addEventListener('pagehide', saveNow);
-  document.addEventListener('visibilitychange', () => { if (document.hidden) saveNow(); });
-  if (channel) channel.onmessage = async () => {
-    // Gleiches Notizbuch in anderem Tab/Embed geändert → übernehmen
-    if (drawing || dirty) return;
-    const data = await store.get(KEY);
-    if (valid(data)) { state = data; syncPages(); }
-  };
+  let state = { pages: [] };
+  let canonMeta = [];            // [{ id, paper }]
+  const canon = new Map();       // pageId → Map(strokeId → stroke)
+  let shownMeta = [], shown = new Map(); // Stand, aus dem state.pages zuletzt aufgebaut wurde
+  let ready = false;             // erst zeichnen, wenn der gespeicherte Stand geladen ist
 
-  function valid(d) { return d && Array.isArray(d.pages) && d.pages.length && d.pages.every(p => Array.isArray(p.strokes)); }
+  const metaOf = pages => pages.map(p => ({ id: p.id, paper: p.paper }));
+  function markShown() {
+    shownMeta = metaOf(state.pages);
+    shown = new Map(state.pages.map(p => [p.id, new Map(p.strokes.map(st => [st.id, st]))]));
+  }
+  // Nur die lokalen Änderungen seit dem letzten Aufbau – Fremdänderungen in canon bleiben unberührt
+  function computeDiff() {
+    const add = [], del = [], cur = new Map();
+    for (const p of state.pages) for (const st of p.strokes) cur.set(st.id, p.id);
+    for (const [pid, m] of shown) for (const st of m.values()) if (cur.get(st.id) !== pid) del.push([pid, st]);
+    for (const p of state.pages) for (const st of p.strokes) if (!shown.get(p.id)?.has(st.id)) add.push([p.id, st]);
+    const metaNow = metaOf(state.pages);
+    const meta = JSON.stringify(metaNow) !== JSON.stringify(shownMeta) ? [shownMeta, metaNow] : null;
+    return add.length || del.length || meta ? { add, del, meta } : null;
+  }
+  // 3-Wege-Merge der Seitenliste: lokale Änderung (base → local) auf den aktuellen Stand (remote) anwenden
+  function merge3(base, local, remote) {
+    const B = new Set(base.map(m => m.id)), L = new Set(local.map(m => m.id)), Rm = new Set(remote.map(m => m.id));
+    const bp = new Map(base.map(m => [m.id, m.paper])), rp = new Map(remote.map(m => [m.id, m.paper]));
+    const out = local.filter(m => !(B.has(m.id) && !Rm.has(m.id)))
+      .map(m => ({ id: m.id, paper: bp.get(m.id) === m.paper && rp.has(m.id) ? rp.get(m.id) : m.paper }));
+    remote.forEach((m, i) => {
+      if (B.has(m.id) || L.has(m.id)) return;
+      const prev = remote.slice(0, i).reverse().find(p => out.some(o => o.id === p.id));
+      out.splice(prev ? out.findIndex(o => o.id === prev.id) + 1 : 0, 0, { id: m.id, paper: m.paper });
+    });
+    return out.length ? out : remote.length ? remote : local;
+  }
+  function applyCanon(d) {
+    for (const [pid, st] of d.del) canon.get(pid)?.delete(st.id);
+    for (const [pid, st] of d.add) { if (!canon.has(pid)) canon.set(pid, new Map()); canon.get(pid).set(st.id, st); }
+    if (d.meta) canonMeta = merge3(d.meta[0], d.meta[1], canonMeta);
+  }
+  const invert = d => ({ add: d.del, del: d.add, meta: d.meta && [d.meta[1], d.meta[0]] });
+
+  let remoteChanged = false;
+  function commit() {
+    const d = computeDiff(); if (!d) return;
+    applyCanon(d); backend.write(d);
+    undoStack.push(d); if (undoStack.length > 200) undoStack.shift();
+    redoStack.length = 0; updateHistoryBtns();
+    markShown();
+    if (remoteChanged) requestRebuild();
+  }
+  function rebuild() {
+    remoteChanged = false;
+    state.pages = canonMeta.map(m => ({ id: m.id, paper: m.paper, strokes: [...(canon.get(m.id)?.values() || [])].sort(byId) }));
+    current = Math.max(0, Math.min(current, state.pages.length - 1));
+    markShown();
+    syncPages();
+  }
+  // Änderungen von anderen Geräten: während eines Strichs warten
+  let rebuildPending = false, rebuildRaf = 0;
+  function requestRebuild() {
+    remoteChanged = true;
+    if (!ready) return;
+    if (drawing) { rebuildPending = true; return; }
+    if (!rebuildRaf) rebuildRaf = requestAnimationFrame(() => { rebuildRaf = 0; rebuild(); });
+  }
 
   // ---------- Verlauf ----------
   const undoStack = [], redoStack = [];
-  const snapshot = () => state.pages.map(p => ({ paper: p.paper, strokes: p.strokes.slice() }));
-  function pushHistory(snap = snapshot()) {
-    undoStack.push(snap); if (undoStack.length > 200) undoStack.shift();
-    redoStack.length = 0; updateHistoryBtns();
+  function undo() { step(undoStack, redoStack); }
+  function redo() { step(redoStack, undoStack); }
+  function step(from, to) {
+    if (!from.length || drawing) return;
+    const d = from.pop(), inv = invert(d);
+    applyCanon(inv); backend.write(inv); to.push(inv); rebuild(); updateHistoryBtns();
   }
-  function undo() { if (!undoStack.length || drawing) return; redoStack.push(snapshot()); applySnap(undoStack.pop()); }
-  function redo() { if (!redoStack.length || drawing) return; undoStack.push(snapshot()); applySnap(redoStack.pop()); }
-  function applySnap(pages) { state.pages = pages; current = Math.min(current, pages.length - 1); syncPages(); scheduleSave(); updateHistoryBtns(); }
   function updateHistoryBtns() { $('#undo').disabled = !undoStack.length; $('#redo').disabled = !redoStack.length; }
+
+  // ---------- Kodierung (kompakt: 5 Byte pro Punkt, Base64) ----------
+  function encStroke(st) {
+    const p = st.points, n = p.length / 3, dv = new DataView(new ArrayBuffer(n * 5));
+    const c16 = v => Math.max(-32000, Math.min(32000, Math.round(v * 10)));
+    for (let i = 0; i < n; i++) {
+      dv.setInt16(i * 5, c16(p[i*3]), true); dv.setInt16(i * 5 + 2, c16(p[i*3+1]), true);
+      dv.setUint8(i * 5 + 4, Math.max(0, Math.min(255, Math.round(p[i*3+2] * 255))));
+    }
+    let bin = ''; const u8 = new Uint8Array(dv.buffer);
+    for (let i = 0; i < u8.length; i += 8192) bin += String.fromCharCode.apply(null, u8.subarray(i, i + 8192));
+    return [st.tool, st.color, st.width, btoa(bin)].join('|');
+  }
+  function decStroke(id, s) {
+    const [tool, color, width, data] = s.split('|');
+    const bin = atob(data), n = bin.length / 5, points = new Array(n * 3);
+    const u8 = Uint8Array.from(bin, c => c.charCodeAt(0)), dv = new DataView(u8.buffer);
+    for (let i = 0; i < n; i++) {
+      points[i*3] = dv.getInt16(i * 5, true) / 10; points[i*3+1] = dv.getInt16(i * 5 + 2, true) / 10;
+      points[i*3+2] = Math.round(dv.getUint8(i * 5 + 4) / 255 * 100) / 100;
+    }
+    return { id, tool, color, width: +width, points };
+  }
+
+  // Gespeicherte Daten → canon. Versteht v2 (kodiert) und das alte v1-Format (state.pages[].strokes).
+  function parseStored(d) {
+    const pages = new Map();
+    if (d?.v === 2 && Array.isArray(d.meta) && d.meta.length) {
+      for (const [pid, m] of Object.entries(d.pages || {})) pages.set(pid, new Map(Object.entries(m).map(([sid, s]) => [sid, decStroke(sid, s)])));
+      return { meta: d.meta, pages };
+    }
+    if (d && Array.isArray(d.pages) && d.pages.length && d.pages.every(p => Array.isArray(p.strokes))) {
+      let k = 0;
+      const meta = d.pages.map(p => ({ id: p.id || rid(8), paper: p.paper || 'lined' }));
+      d.pages.forEach((p, i) => pages.set(meta[i].id, new Map(p.strokes.map(st => {
+        const id = st.id || '0' + (k++).toString(36).padStart(8, '0') + rid(4);
+        return [id, { id, tool: st.tool, color: st.color, width: st.width, points: st.points }];
+      }))));
+      return { meta, pages };
+    }
+    return null;
+  }
+  function loadInto(d) {
+    const r = parseStored(d); if (!r) return false;
+    canonMeta = r.meta; canon.clear();
+    for (const [pid, m] of r.pages) canon.set(pid, m);
+    return true;
+  }
+  function exportData() {
+    const pages = {};
+    for (const [pid, m] of canon) { pages[pid] = {}; for (const [sid, st] of m) pages[pid][sid] = encStroke(st); }
+    return { v: 2, meta: canonMeta, pages };
+  }
+  // Feste Id: öffnen zwei Geräte gleichzeitig ein neues Notizbuch, entsteht trotzdem dieselbe erste Seite
+  function freshNotebook() { canon.clear(); canonMeta = [{ id: 'p0', paper: 'lined' }]; }
+
+  // ---------- Lokaler Speicher (ohne Firebase) ----------
+  const localBackend = {
+    timer: 0, dirty: false,
+    channel: 'BroadcastChannel' in window ? new BroadcastChannel('inknotes:' + NB_ID) : null,
+    async start() {
+      if (!loadInto(await store.get(KEY))) freshNotebook();
+      ready = true; rebuild(); setSync('local');
+      if (this.channel) this.channel.onmessage = async () => {
+        // Gleiches Notizbuch in anderem Tab geändert → übernehmen
+        if (this.dirty) return;
+        loadInto(await store.get(KEY)); requestRebuild();
+      };
+      addEventListener('pagehide', () => this.flush());
+      document.addEventListener('visibilitychange', () => { if (document.hidden) this.flush(); });
+    },
+    write() { this.dirty = true; clearTimeout(this.timer); this.timer = setTimeout(() => this.flush(), 400); },
+    async flush() {
+      clearTimeout(this.timer); if (!this.dirty) return; this.dirty = false;
+      try { await store.set(KEY, exportData()); this.channel?.postMessage('saved'); }
+      catch (err) { this.dirty = true; toast('Speichern fehlgeschlagen – bitte Backup exportieren'); console.error(err); }
+    },
+  };
+
+  // ---------- Firebase Firestore (Synchronisation zwischen allen Geräten und Embeds) ----------
+  // notebooks/{id}             → { pages: [{ id, paper }] }
+  // notebooks/{id}/pages/{pid} → { s: { strokeId: "tool|farbe|breite|punkte" } }
+  const firebaseBackend = {
+    async start() {
+      const SDK = 'https://www.gstatic.com/firebasejs/11.0.2/';
+      const [{ initializeApp }, fs] = await Promise.all([import(SDK + 'firebase-app.js'), import(SDK + 'firebase-firestore.js')]);
+      this.fs = fs;
+      const app = initializeApp(FIREBASE_CONFIG);
+      let db;
+      try { db = fs.initializeFirestore(app, { localCache: fs.persistentLocalCache({ tabManager: fs.persistentMultipleTabManager() }) }); }
+      catch { db = fs.getFirestore(app); }
+      this.metaRef = fs.doc(db, 'notebooks', NB_ID);
+      this.pagesCol = fs.collection(this.metaRef, 'pages');
+      this.db = db;
+
+      fs.onSnapshot(this.pagesCol, { includeMetadataChanges: true }, qs => {
+        for (const ch of qs.docChanges()) this.applyPage(ch.doc.id, ch.type === 'removed' ? {} : ch.doc.data().s || {});
+        setSync(qs.metadata.hasPendingWrites ? 'saving' : qs.metadata.fromCache ? 'offline' : 'ok');
+        requestRebuild();
+      }, err => this.fail(err));
+      fs.onSnapshot(this.metaRef, async snap => {
+        if (!snap.exists()) {
+          if (snap.metadata.fromCache) return; // Server abwarten
+          // Neues Notizbuch: vorhandene lokale Notizen dieses Geräts übernehmen
+          if (!loadInto(await store.get(KEY))) freshNotebook();
+          const all = []; for (const [pid, m] of canon) for (const st of m.values()) all.push([pid, st]);
+          canon.clear();
+          const d = { add: all, del: [], meta: [[], canonMeta] };
+          canonMeta = []; applyCanon(d); this.write(d);
+        } else canonMeta = snap.data().pages || [];
+        if (!ready) { ready = true; rebuild(); } else requestRebuild();
+      }, err => this.fail(err));
+    },
+    applyPage(pid, s) {
+      if (!canon.has(pid)) canon.set(pid, new Map());
+      const m = canon.get(pid);
+      for (const sid of m.keys()) if (!(sid in s)) m.delete(sid);
+      for (const sid in s) if (!m.has(sid)) { try { m.set(sid, decStroke(sid, s[sid])); } catch {} }
+    },
+    write(d) {
+      const fs = this.fs, batch = fs.writeBatch(this.db), byPage = new Map();
+      const put = (pid, sid, v) => { if (!byPage.has(pid)) byPage.set(pid, {}); byPage.get(pid)[sid] = v; };
+      for (const [pid, st] of d.del) put(pid, st.id, fs.deleteField());
+      for (const [pid, st] of d.add) put(pid, st.id, encStroke(st));
+      for (const [pid, s] of byPage) batch.set(fs.doc(this.pagesCol, pid), { s }, { merge: true });
+      batch.commit().catch(err => this.fail(err));
+      if (d.meta) {
+        const [base, local] = d.meta, fallback = canonMeta;
+        fs.runTransaction(this.db, async tx => {
+          const snap = await tx.get(this.metaRef);
+          tx.set(this.metaRef, { pages: merge3(base, local, snap.exists() ? snap.data().pages || [] : []) });
+        }).catch(() => fs.setDoc(this.metaRef, { pages: fallback }).catch(err => this.fail(err))); // offline
+      }
+    },
+    fail(err) {
+      console.error(err); setSync('error');
+      toast(err.code === 'permission-denied' ? 'Sync: keine Berechtigung – Firestore-Regeln prüfen' : 'Sync-Fehler: ' + (err.code || err.message));
+    },
+  };
+
+  let backend = FIREBASE_CONFIG ? firebaseBackend : localBackend;
 
   // ---------- Zeichnen ----------
   const pf = p => 0.35 + p * 1.3;
@@ -476,7 +675,7 @@
       if (!settings.penOnly) { settings.penOnly = true; buildToolUI(); toast('Apple Pencil erkannt – mit zwei Fingern scrollen'); }
       saveSettings();
     }
-    if (drawing) return;
+    if (drawing || !ready) return;
     if (e.pointerType === 'touch' && settings.penOnly) return;
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     e.preventDefault();
@@ -488,11 +687,11 @@
     // Stift-Taste am Stylus (Radierer-Ende / Button) → radieren
     const tool = (e.pointerType === 'pen' && (e.buttons & 32)) ? 'eraser' : settings.tool;
     if (tool === 'eraser') {
-      drawing = { v, id: e.pointerId, snap: snapshot(), erased: false, last: [x, y] };
+      drawing = { v, id: e.pointerId, erased: false, last: [x, y] };
       eraseAt(x, y);
     } else {
       drawing = { v, id: e.pointerId, stroke: {
-        tool, color: settings.color[tool], width: SIZES[tool][settings.size[tool]], points: [r1(x), r1(y), r2(pressure(e))],
+        id: strokeId(), tool, color: settings.color[tool], width: SIZES[tool][settings.size[tool]], points: [r1(x), r1(y), r2(pressure(e))],
       } };
     }
     scheduleLive();
@@ -519,12 +718,12 @@
     if (!drawing || e.pointerId !== drawing.id) return;
     const d = drawing; drawing = null;
     if (d.stroke) {
-      pushHistory();
       state.pages[d.v.i].strokes.push(d.stroke);
       if (d.v.visible) { const s = d.v.canvas.width / PAGE_W; d.v.ctx.setTransform(s, 0, 0, s, 0, 0); drawStroke(d.v.ctx, d.stroke); }
-      scheduleSave();
-    } else if (d.erased) scheduleSave();
+    }
+    commit();
     cancelAnimationFrame(liveRaf); liveRaf = 0; drawLive(); live.remove();
+    if (rebuildPending) { rebuildPending = false; requestRebuild(); }
   }
 
   // ---------- Zwei-Finger-Scrollen und -Zoomen (Nur-Stift-Modus) ----------
@@ -615,7 +814,7 @@
     const page = state.pages[drawing.v.i], r = SIZES.eraser[settings.size.eraser] / 2;
     const keep = page.strokes.filter(st => !hit(st, x, y, r));
     if (keep.length !== page.strokes.length) {
-      if (!drawing.erased) { pushHistory(drawing.snap); drawing.erased = true; }
+      drawing.erased = true;
       page.strokes = keep; render(drawing.v);
     }
   }
@@ -668,24 +867,22 @@
     toast(settings.penOnly ? 'Nur Stift schreibt – zwei Finger scrollen und zoomen' : 'Finger und Stift schreiben');
   };
   $('#paper').onchange = e => {
-    pushHistory();
     state.pages[current].paper = e.target.value;
-    render(views[current]); scheduleSave();
+    render(views[current]); commit();
   };
   $('#addPage').onclick = () => {
-    pushHistory();
+    if (!ready) return;
     state.pages.splice(current + 1, 0, newPage(state.pages[current].paper));
-    syncPages(); scheduleSave();
+    syncPages(); commit();
     setCurrent(current + 1);
     views[current].el.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
   $('#delPage').onclick = () => {
     if (state.pages.length <= 1) return;
     if (state.pages[current].strokes.length && !confirm(`Seite ${current + 1} löschen?`)) return;
-    pushHistory();
     state.pages.splice(current, 1);
     current = Math.min(current, state.pages.length - 1);
-    syncPages(); scheduleSave(); toast('Seite gelöscht – Rückgängig möglich');
+    syncPages(); commit(); toast('Seite gelöscht – Rückgängig möglich');
   };
 
   addEventListener('keydown', e => {
@@ -734,12 +931,12 @@
       window.print();
     },
     backup() {
-      download(new Blob([JSON.stringify(state)], { type: 'application/json' }), `notizbuch-${NB_ID}.json`);
+      download(new Blob([JSON.stringify(exportData())], { type: 'application/json' }), `notizbuch-${NB_ID}.json`);
     },
     restore() { $('#fileIn').click(); },
     clearPage() {
       if (!state.pages[current].strokes.length) return;
-      pushHistory(); state.pages[current].strokes = []; render(views[current]); scheduleSave();
+      state.pages[current].strokes = []; render(views[current]); commit();
       toast('Seite geleert – Rückgängig möglich');
     },
   };
@@ -757,8 +954,10 @@
     const f = e.target.files[0]; e.target.value = ''; if (!f) return;
     try {
       const data = JSON.parse(await f.text());
-      if (!valid(data)) throw new Error('Ungültiges Format');
-      pushHistory(); state = data; current = 0; syncPages(); scheduleSave(); toast('Backup importiert');
+      const r = parseStored(data);
+      if (!r || !ready) throw new Error('Ungültiges Format');
+      state.pages = r.meta.map(m => ({ id: m.id, paper: m.paper, strokes: [...(r.pages.get(m.id)?.values() || [])].sort(byId) }));
+      current = 0; syncPages(); commit(); toast('Backup importiert – Rückgängig möglich');
     } catch (err) { toast('Import fehlgeschlagen: ' + err.message); }
   };
   $('#closeDlg').onclick = () => $('#linkDlg').close();
@@ -768,6 +967,12 @@
     catch { inp.select(); document.execCommand('copy') ? toast('Link kopiert') : toast('Bitte manuell kopieren'); }
   });
 
+  const SYNC_LABEL = {
+    local: 'Nur lokal gespeichert (keine Synchronisation eingerichtet)', ok: 'Synchronisiert',
+    saving: 'Wird synchronisiert …', offline: 'Offline – wird später synchronisiert', error: 'Synchronisationsfehler',
+  };
+  function setSync(s) { const el = $('#sync'); el.dataset.s = s; el.title = SYNC_LABEL[s]; }
+
   let toastTimer;
   function toast(msg) {
     const t = $('#toast'); t.textContent = msg; t.classList.add('show');
@@ -776,7 +981,10 @@
 
   // ---------- Start ----------
   buildToolUI(); updateHistoryBtns(); syncPages();
-  store.get(KEY).then(data => { if (valid(data) && !undoStack.length) { state = data; syncPages(); } });
+  backend.start().catch(err => {
+    console.error(err);
+    if (backend !== localBackend) { toast('Sync nicht erreichbar – nur lokal gespeichert'); backend = localBackend; localBackend.start(); }
+  });
   if (navigator.storage?.persist) navigator.storage.persist().catch(() => {});
 })();
 </script>
