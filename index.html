@@ -1,0 +1,720 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Ink Notes</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%232563eb' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 20h9'/%3E%3Cpath d='M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #eef0f3;
+    --bar: #ffffff;
+    --bar-border: #dfe2e7;
+    --text: #1f2328;
+    --muted: #6b7280;
+    --hover: #f1f3f5;
+    --active: #e3ecfd;
+    --accent: #2563eb;
+    --shadow: 0 1px 3px rgba(0,0,0,.08), 0 4px 16px rgba(0,0,0,.06);
+    --menu: #ffffff;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #191a1c;
+      --bar: #232427;
+      --bar-border: #34363a;
+      --text: #e8e9eb;
+      --muted: #9ba1a9;
+      --hover: #2e3034;
+      --active: #263552;
+      --accent: #6b9bff;
+      --shadow: 0 1px 3px rgba(0,0,0,.4), 0 4px 16px rgba(0,0,0,.3);
+      --menu: #2a2b2f;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #191a1c; --bar: #232427; --bar-border: #34363a; --text: #e8e9eb; --muted: #9ba1a9;
+    --hover: #2e3034; --active: #263552; --accent: #6b9bff; --menu: #2a2b2f;
+    --shadow: 0 1px 3px rgba(0,0,0,.4), 0 4px 16px rgba(0,0,0,.3);
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg); color: var(--text);
+    font: 13px/1.3 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    display: flex; flex-direction: column; overflow: hidden;
+    -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
+  }
+  .bar {
+    flex: none; display: flex; align-items: center; gap: 4px;
+    padding: 6px 8px; background: var(--bar); border-bottom: 1px solid var(--bar-border);
+    overflow-x: auto; scrollbar-width: none; position: relative; z-index: 5;
+  }
+  .bar::-webkit-scrollbar { display: none; }
+  .grp { display: flex; align-items: center; gap: 2px; flex: none; }
+  .sep { width: 1px; height: 24px; background: var(--bar-border); margin: 0 4px; flex: none; }
+  .tb {
+    flex: none; width: 34px; height: 34px; border: 0; border-radius: 8px; background: transparent;
+    color: var(--text); display: grid; place-items: center; cursor: pointer; padding: 0;
+  }
+  .tb:hover { background: var(--hover); }
+  .tb[aria-pressed="true"] { background: var(--active); color: var(--accent); }
+  .tb:disabled { opacity: .35; cursor: default; background: transparent; }
+  .tb svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .sw {
+    flex: none; width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--bar);
+    box-shadow: 0 0 0 1px var(--bar-border); cursor: pointer; padding: 0; margin: 0 2px;
+  }
+  .sw[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--accent); }
+  .custom { position: relative; overflow: hidden; background: conic-gradient(red, yellow, lime, cyan, blue, magenta, red); }
+  .custom input { position: absolute; inset: -8px; opacity: 0; cursor: pointer; }
+  .size { width: 30px; }
+  .size i { display: block; border-radius: 50%; background: currentColor; }
+  select {
+    flex: none; height: 30px; border-radius: 8px; border: 1px solid var(--bar-border);
+    background: var(--bar); color: var(--text); font: inherit; padding: 0 6px;
+  }
+  .zoom { min-width: 42px; text-align: center; color: var(--muted); font-variant-numeric: tabular-nums; cursor: pointer; border: 0; background: none; font: inherit; }
+  .pageind { flex: none; margin-left: auto; padding-left: 8px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+  #scroller { flex: 1; overflow: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
+  #pages { width: max-content; min-width: 100%; padding: 12px 12px 40px; }
+  .page {
+    position: relative; margin: 0 auto 14px; background: #fff; box-shadow: var(--shadow);
+    border-radius: 2px; touch-action: none; cursor: crosshair;
+  }
+  body.penonly .page { touch-action: pan-x pan-y; }
+  .page canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .page .num { position: absolute; right: 10px; bottom: 8px; font-size: 11px; color: #9aa1ab; pointer-events: none; }
+
+  .menu {
+    position: fixed; top: 50px; right: 8px; z-index: 10; min-width: 230px; padding: 6px;
+    background: var(--menu); border: 1px solid var(--bar-border); border-radius: 10px; box-shadow: var(--shadow);
+    display: none;
+  }
+  .menu.open { display: block; }
+  .menu button {
+    display: block; width: 100%; text-align: left; border: 0; background: none; color: var(--text);
+    font: inherit; padding: 8px 10px; border-radius: 6px; cursor: pointer;
+  }
+  .menu button:hover { background: var(--hover); }
+  .menu hr { border: 0; border-top: 1px solid var(--bar-border); margin: 4px 0; }
+  .menu .danger { color: #d93025; }
+
+  dialog {
+    border: 1px solid var(--bar-border); border-radius: 12px; background: var(--menu); color: var(--text);
+    padding: 18px; width: min(460px, calc(100vw - 32px)); box-shadow: var(--shadow);
+  }
+  dialog::backdrop { background: rgba(0,0,0,.3); }
+  dialog h2 { font-size: 15px; margin: 0 0 8px; }
+  dialog p { margin: 0 0 12px; color: var(--muted); line-height: 1.45; }
+  dialog input[type=text] {
+    width: 100%; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--bar-border);
+    background: var(--bg); color: var(--text); font: 12px ui-monospace, Menlo, monospace; user-select: text;
+  }
+  dialog .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; flex-wrap: wrap; }
+  .btn {
+    border: 1px solid var(--bar-border); background: var(--bar); color: var(--text); font: inherit;
+    padding: 7px 12px; border-radius: 8px; cursor: pointer;
+  }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+  .toast {
+    position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%) translateY(20px); opacity: 0;
+    background: #222; color: #fff; padding: 8px 14px; border-radius: 8px; transition: .2s; pointer-events: none; z-index: 20;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%); }
+
+  #print { display: none; }
+  @media print {
+    @page { size: A4; margin: 0; }
+    body { display: block; overflow: visible; background: #fff; }
+    body > *:not(#print) { display: none !important; }
+    #print { display: block; }
+    #print img { display: block; width: 210mm; height: 297mm; page-break-after: always; break-after: page; }
+  }
+</style>
+</head>
+<body>
+<header class="bar" id="bar">
+  <div class="grp">
+    <button class="tb" data-tool="pen" title="Stift (P)"><svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></button>
+    <button class="tb" data-tool="hl" title="Textmarker (H)"><svg viewBox="0 0 24 24"><path d="m9 11-6 6v3h9l3-3"/><path d="m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4"/></svg></button>
+    <button class="tb" data-tool="eraser" title="Radierer (E)"><svg viewBox="0 0 24 24"><path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"/><path d="M22 21H7"/><path d="m5 11 9 9"/></svg></button>
+  </div>
+  <div class="sep"></div>
+  <div class="grp" id="swatches"></div>
+  <div class="sep"></div>
+  <div class="grp" id="sizes"></div>
+  <div class="sep"></div>
+  <div class="grp">
+    <button class="tb" id="undo" title="Rückgängig (⌘Z)"><svg viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg></button>
+    <button class="tb" id="redo" title="Wiederholen (⇧⌘Z)"><svg viewBox="0 0 24 24"><path d="m15 14 5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/></svg></button>
+  </div>
+  <div class="sep"></div>
+  <div class="grp">
+    <select id="paper" title="Papier der aktuellen Seite">
+      <option value="lined">Liniert</option>
+      <option value="grid">Kariert</option>
+      <option value="dots">Punkte</option>
+      <option value="blank">Blanko</option>
+    </select>
+    <button class="tb" id="addPage" title="Seite einfügen"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M12 18v-6"/><path d="M9 15h6"/></svg></button>
+    <button class="tb" id="delPage" title="Seite löschen"><svg viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
+  </div>
+  <div class="sep"></div>
+  <div class="grp">
+    <button class="tb" id="zoomOut" title="Verkleinern"><svg viewBox="0 0 24 24"><path d="M5 12h14"/></svg></button>
+    <button class="zoom" id="zoomLabel" title="Auf Breite einpassen">100%</button>
+    <button class="tb" id="zoomIn" title="Vergrößern"><svg viewBox="0 0 24 24"><path d="M5 12h14M12 5v14"/></svg></button>
+  </div>
+  <div class="sep"></div>
+  <div class="grp">
+    <button class="tb" id="penOnly" title="Nur Stift schreibt – Finger scrollen (für Apple Pencil / Stylus)"><svg viewBox="0 0 24 24"><path d="M18 11V6a2 2 0 0 0-4 0"/><path d="M14 10V4a2 2 0 0 0-4 0v2"/><path d="M10 10.5V6a2 2 0 0 0-4 0v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-6-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/></svg></button>
+    <button class="tb" id="menuBtn" title="Mehr"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button>
+  </div>
+  <span class="pageind" id="pageInd">1 / 1</span>
+</header>
+
+<div class="menu" id="menu" role="menu">
+  <button data-act="newNotebook">Neues Notizbuch / Embed-Link …</button>
+  <button data-act="openTab">In neuem Tab öffnen</button>
+  <hr>
+  <button data-act="png">Seite als PNG speichern</button>
+  <button data-act="pdf">Als PDF drucken / speichern</button>
+  <hr>
+  <button data-act="backup">Backup exportieren (.json)</button>
+  <button data-act="restore">Backup importieren …</button>
+  <hr>
+  <button data-act="clearPage" class="danger">Aktuelle Seite leeren</button>
+</div>
+
+<main id="scroller"><div id="pages"></div></main>
+
+<dialog id="linkDlg">
+  <h2>Embed-Link</h2>
+  <p>Jede <code>?id=</code> ist ein eigenes Notizbuch. Link kopieren und in Notion mit <b>/embed</b> einfügen.</p>
+  <label style="display:block;margin-bottom:4px;color:var(--muted)">Dieses Notizbuch</label>
+  <input type="text" id="curLink" readonly>
+  <label style="display:block;margin:12px 0 4px;color:var(--muted)">Neues, leeres Notizbuch</label>
+  <input type="text" id="newLink" readonly>
+  <div class="row">
+    <button class="btn" data-copy="curLink">Aktuellen kopieren</button>
+    <button class="btn primary" data-copy="newLink">Neuen kopieren</button>
+    <button class="btn" id="closeDlg">Schließen</button>
+  </div>
+</dialog>
+
+<input type="file" id="fileIn" accept="application/json,.json" hidden>
+<div id="print"></div>
+<div class="toast" id="toast"></div>
+
+<script>
+(() => {
+  'use strict';
+  const PAGE_W = 1000, PAGE_H = 1414; // A4-Verhältnis, logische Einheiten
+  const SIZES = { pen: [1.6, 3, 6], hl: [14, 24, 36], eraser: [12, 28, 60] };
+  const PALETTE = {
+    pen: ['#1f2328', '#1d4ed8', '#dc2626', '#15803d', '#7c3aed'],
+    hl:  ['#facc15', '#4ade80', '#f472b6', '#60a5fa', '#fb923c'],
+  };
+
+  const params = new URLSearchParams(location.search);
+  const NB_ID = (params.get('id') || 'default').replace(/[^\w-]/g, '').slice(0, 64) || 'default';
+  const KEY = 'notebook:' + NB_ID;
+  if (params.get('theme') === 'dark' || params.get('theme') === 'light') document.documentElement.dataset.theme = params.get('theme');
+
+  const $ = s => document.querySelector(s);
+  const scroller = $('#scroller'), pagesEl = $('#pages');
+
+  // ---------- Einstellungen (pro Gerät) ----------
+  const settings = Object.assign({
+    tool: 'pen', color: { pen: PALETTE.pen[0], hl: PALETTE.hl[0] }, size: { pen: 1, hl: 1, eraser: 1 },
+    penOnly: false, zoom: 1,
+  }, readJSON('inknotes:settings'));
+  function saveSettings() { try { localStorage.setItem('inknotes:settings', JSON.stringify(settings)); } catch {} }
+  function readJSON(k) { try { return JSON.parse(localStorage.getItem(k)) || {}; } catch { return {}; } }
+
+  // ---------- Speicher (IndexedDB, Fallback localStorage) ----------
+  const store = (() => {
+    let dbp;
+    const open = () => dbp ||= new Promise((res, rej) => {
+      const r = indexedDB.open('inknotes', 1);
+      r.onupgradeneeded = () => r.result.createObjectStore('notebooks');
+      r.onsuccess = () => res(r.result);
+      r.onerror = () => rej(r.error);
+    });
+    const req = (mode, fn) => open().then(db => new Promise((res, rej) => {
+      const tx = db.transaction('notebooks', mode);
+      const q = fn(tx.objectStore('notebooks'));
+      tx.oncomplete = () => res(q.result);
+      tx.onerror = () => rej(tx.error);
+    }));
+    return {
+      async get(k) {
+        try { return await req('readonly', s => s.get(k)); }
+        catch { try { return JSON.parse(localStorage.getItem('inknotes:' + k)); } catch { return null; } }
+      },
+      async set(k, v) {
+        try { await req('readwrite', s => s.put(v, k)); }
+        catch { localStorage.setItem('inknotes:' + k, JSON.stringify(v)); }
+      },
+    };
+  })();
+
+  let state = { v: 1, pages: [newPage('lined')] };
+  function newPage(paper) { return { paper, strokes: [] }; }
+
+  let saveTimer = 0, dirty = false;
+  const channel = 'BroadcastChannel' in window ? new BroadcastChannel('inknotes:' + NB_ID) : null;
+  function scheduleSave() {
+    dirty = true; clearTimeout(saveTimer); saveTimer = setTimeout(saveNow, 400);
+  }
+  async function saveNow() {
+    clearTimeout(saveTimer);
+    if (!dirty) return;
+    dirty = false;
+    try { await store.set(KEY, state); channel?.postMessage('saved'); }
+    catch (err) { dirty = true; toast('Speichern fehlgeschlagen – bitte Backup exportieren'); console.error(err); }
+  }
+  addEventListener('pagehide', saveNow);
+  document.addEventListener('visibilitychange', () => { if (document.hidden) saveNow(); });
+  if (channel) channel.onmessage = async () => {
+    // Gleiches Notizbuch in anderem Tab/Embed geändert → übernehmen
+    if (drawing || dirty) return;
+    const data = await store.get(KEY);
+    if (valid(data)) { state = data; syncPages(); }
+  };
+
+  function valid(d) { return d && Array.isArray(d.pages) && d.pages.length && d.pages.every(p => Array.isArray(p.strokes)); }
+
+  // ---------- Verlauf ----------
+  const undoStack = [], redoStack = [];
+  const snapshot = () => state.pages.map(p => ({ paper: p.paper, strokes: p.strokes.slice() }));
+  function pushHistory(snap = snapshot()) {
+    undoStack.push(snap); if (undoStack.length > 200) undoStack.shift();
+    redoStack.length = 0; updateHistoryBtns();
+  }
+  function undo() { if (!undoStack.length || drawing) return; redoStack.push(snapshot()); applySnap(undoStack.pop()); }
+  function redo() { if (!redoStack.length || drawing) return; undoStack.push(snapshot()); applySnap(redoStack.pop()); }
+  function applySnap(pages) { state.pages = pages; current = Math.min(current, pages.length - 1); syncPages(); scheduleSave(); updateHistoryBtns(); }
+  function updateHistoryBtns() { $('#undo').disabled = !undoStack.length; $('#redo').disabled = !redoStack.length; }
+
+  // ---------- Zeichnen ----------
+  const pf = p => 0.35 + p * 1.3;
+  function drawPaper(ctx, paper) {
+    ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, PAGE_W, PAGE_H);
+    const g = 40;
+    if (paper === 'lined') {
+      ctx.strokeStyle = '#c9d6ec'; ctx.lineWidth = 1.2; ctx.beginPath();
+      for (let y = 120; y < PAGE_H - 30; y += g) { ctx.moveTo(0, y); ctx.lineTo(PAGE_W, y); }
+      ctx.stroke();
+      ctx.strokeStyle = '#f0b4b0'; ctx.beginPath(); ctx.moveTo(90, 0); ctx.lineTo(90, PAGE_H); ctx.stroke();
+    } else if (paper === 'grid') {
+      ctx.strokeStyle = '#dfe5ee'; ctx.lineWidth = 1; ctx.beginPath();
+      for (let x = g / 2; x < PAGE_W; x += g) { ctx.moveTo(x, 0); ctx.lineTo(x, PAGE_H); }
+      for (let y = g / 2; y < PAGE_H; y += g) { ctx.moveTo(0, y); ctx.lineTo(PAGE_W, y); }
+      ctx.stroke();
+    } else if (paper === 'dots') {
+      ctx.fillStyle = '#b9c1cd'; ctx.beginPath();
+      for (let x = g / 2; x < PAGE_W; x += g) for (let y = g / 2; y < PAGE_H; y += g) { ctx.moveTo(x + 1.8, y); ctx.arc(x, y, 1.8, 0, 6.2832); }
+      ctx.fill();
+    }
+  }
+  function drawStroke(ctx, st) {
+    const p = st.points, n = p.length / 3;
+    ctx.save();
+    ctx.strokeStyle = ctx.fillStyle = st.color; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    if (st.tool === 'hl') {
+      ctx.globalAlpha = 0.4; ctx.globalCompositeOperation = 'multiply'; ctx.lineWidth = st.width;
+      ctx.beginPath(); ctx.moveTo(p[0], p[1]);
+      if (n === 1) ctx.lineTo(p[0] + 0.1, p[1]);
+      for (let i = 1; i < n - 1; i++) ctx.quadraticCurveTo(p[i*3], p[i*3+1], (p[i*3] + p[i*3+3]) / 2, (p[i*3+1] + p[i*3+4]) / 2);
+      if (n > 1) ctx.lineTo(p[(n-1)*3], p[(n-1)*3+1]);
+      ctx.stroke();
+    } else if (n === 1) {
+      ctx.beginPath(); ctx.arc(p[0], p[1], st.width * pf(p[2]) / 2, 0, 6.2832); ctx.fill();
+    } else {
+      // Segmentweise mit Mittelpunkt-Glättung, Breite folgt dem Druck
+      let lx = p[0], ly = p[1];
+      for (let i = 1; i < n; i++) {
+        const px = p[(i-1)*3], py = p[(i-1)*3+1], x = p[i*3], y = p[i*3+1];
+        const mx = (px + x) / 2, my = (py + y) / 2;
+        ctx.lineWidth = st.width * pf((p[(i-1)*3+2] + p[i*3+2]) / 2);
+        ctx.beginPath(); ctx.moveTo(lx, ly);
+        if (i === 1) ctx.lineTo(mx, my); else ctx.quadraticCurveTo(px, py, mx, my);
+        ctx.stroke();
+        lx = mx; ly = my;
+      }
+      ctx.beginPath(); ctx.moveTo(lx, ly); ctx.lineTo(p[(n-1)*3], p[(n-1)*3+1]); ctx.stroke();
+    }
+    ctx.restore();
+  }
+  function renderPage(ctx, page, scale) {
+    ctx.setTransform(scale, 0, 0, scale, 0, 0);
+    drawPaper(ctx, page.paper);
+    for (const st of page.strokes) drawStroke(ctx, st);
+  }
+
+  // ---------- Seiten-Ansichten ----------
+  let views = [], cssW = 0, current = 0;
+  const live = document.createElement('canvas'); live.style.pointerEvents = 'none';
+  const liveCtx = live.getContext('2d');
+  const io = new IntersectionObserver(entries => {
+    for (const en of entries) {
+      const v = en.target._view; v.visible = en.isIntersecting;
+      if (v.visible) sizeCanvas(v); else { v.canvas.width = 0; v.canvas.height = 0; } // Speicher freigeben
+    }
+  }, { root: scroller, rootMargin: '150% 0px' });
+
+  const pixelW = () => Math.min(Math.round(cssW * Math.min(devicePixelRatio || 1, 3)), 4000);
+  function sizeCanvas(v) {
+    const w = pixelW(), h = Math.round(w * PAGE_H / PAGE_W);
+    if (v.canvas.width !== w || v.canvas.height !== h) { v.canvas.width = w; v.canvas.height = h; }
+    render(v);
+  }
+  function render(v) { if (v.visible) renderPage(v.ctx, state.pages[v.i], v.canvas.width / PAGE_W); }
+
+  function makeView() {
+    const el = document.createElement('div'); el.className = 'page';
+    const canvas = document.createElement('canvas');
+    const num = document.createElement('span'); num.className = 'num';
+    el.append(canvas, num);
+    const v = { el, canvas, ctx: canvas.getContext('2d'), num, visible: false, i: 0 };
+    el._view = v;
+    el.addEventListener('pointerdown', e => onDown(v, e));
+    el.addEventListener('pointermove', onMove);
+    el.addEventListener('pointerup', onUp);
+    el.addEventListener('pointercancel', onUp);
+    // iPad: Apple Pencil darf auch im "Nur Stift"-Modus nicht scrollen
+    const stopStylus = e => {
+      if (!settings.penOnly) { e.preventDefault(); return; }
+      for (const t of e.changedTouches) if (t.touchType === 'stylus') { e.preventDefault(); return; }
+    };
+    el.addEventListener('touchstart', stopStylus, { passive: false });
+    el.addEventListener('touchmove', e => { if (drawing) e.preventDefault(); }, { passive: false });
+    return v;
+  }
+  function syncPages() {
+    while (views.length < state.pages.length) { const v = makeView(); views.push(v); pagesEl.append(v.el); io.observe(v.el); }
+    while (views.length > state.pages.length) { const v = views.pop(); io.unobserve(v.el); v.el.remove(); }
+    views.forEach((v, i) => { v.i = i; v.num.textContent = i + 1; });
+    layout();
+    updatePageUI();
+  }
+  function layout() {
+    const fit = Math.min(scroller.clientWidth - 24, 1100);
+    cssW = Math.max(160, Math.round(fit * settings.zoom));
+    const cssH = Math.round(cssW * PAGE_H / PAGE_W);
+    for (const v of views) {
+      v.el.style.width = cssW + 'px'; v.el.style.height = cssH + 'px';
+      if (v.visible) sizeCanvas(v);
+    }
+    $('#zoomLabel').textContent = Math.round(settings.zoom * 100) + '%';
+  }
+  new ResizeObserver(() => layout()).observe(scroller);
+
+  function setZoom(z) {
+    z = Math.max(0.5, Math.min(3, Math.round(z * 100) / 100));
+    const rel = scroller.scrollTop / Math.max(1, scroller.scrollHeight);
+    settings.zoom = z; saveSettings(); layout();
+    scroller.scrollTop = rel * scroller.scrollHeight;
+  }
+
+  function setCurrent(i) { if (i !== current) { current = i; updatePageUI(); } }
+  function updatePageUI() {
+    $('#pageInd').textContent = `${current + 1} / ${state.pages.length}`;
+    $('#paper').value = state.pages[current]?.paper || 'lined';
+    $('#delPage').disabled = state.pages.length <= 1;
+  }
+  scroller.addEventListener('scroll', () => {
+    if (drawing) return;
+    const mid = scroller.getBoundingClientRect().top + scroller.clientHeight / 2;
+    let best = current, bd = Infinity;
+    for (const v of views) {
+      const r = v.el.getBoundingClientRect();
+      const d = mid < r.top ? r.top - mid : mid > r.bottom ? mid - r.bottom : 0;
+      if (d < bd) { bd = d; best = v.i; }
+    }
+    setCurrent(best);
+  }, { passive: true });
+
+  // ---------- Eingabe ----------
+  let drawing = null, liveRaf = 0;
+  const r1 = n => Math.round(n * 10) / 10, r2 = n => Math.round(n * 100) / 100;
+  function toPage(v, e) {
+    const r = v.el.getBoundingClientRect();
+    return [(e.clientX - r.left) / r.width * PAGE_W, (e.clientY - r.top) / r.height * PAGE_H];
+  }
+  const pressure = e => e.pointerType === 'pen' && e.pressure > 0 ? e.pressure : 0.5;
+
+  function attachLive(v) {
+    v.el.append(live);
+    live.width = v.canvas.width || pixelW(); live.height = v.canvas.height || Math.round(live.width * PAGE_H / PAGE_W);
+  }
+  function scheduleLive() { if (!liveRaf) liveRaf = requestAnimationFrame(drawLive); }
+  function drawLive() {
+    liveRaf = 0;
+    const s = live.width / PAGE_W;
+    liveCtx.setTransform(1, 0, 0, 1, 0, 0); liveCtx.clearRect(0, 0, live.width, live.height);
+    if (!drawing) return;
+    liveCtx.setTransform(s, 0, 0, s, 0, 0);
+    if (drawing.stroke) drawStroke(liveCtx, drawing.stroke);
+    else if (drawing.last) {
+      liveCtx.beginPath(); liveCtx.arc(drawing.last[0], drawing.last[1], SIZES.eraser[settings.size.eraser] / 2, 0, 6.2832);
+      liveCtx.lineWidth = 1.5 / s * Math.min(devicePixelRatio || 1, 3); liveCtx.strokeStyle = 'rgba(80,90,100,.7)';
+      liveCtx.fillStyle = 'rgba(200,205,212,.25)'; liveCtx.fill(); liveCtx.stroke();
+    }
+  }
+
+  function onDown(v, e) {
+    if (drawing) return;
+    if (e.pointerType === 'touch' && settings.penOnly) return;
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    e.preventDefault();
+    closeMenu();
+    setCurrent(v.i);
+    try { v.el.setPointerCapture(e.pointerId); } catch {}
+    attachLive(v);
+    const [x, y] = toPage(v, e);
+    // Stift-Taste am Stylus (Radierer-Ende / Button) → radieren
+    const tool = (e.pointerType === 'pen' && (e.buttons & 32)) ? 'eraser' : settings.tool;
+    if (tool === 'eraser') {
+      drawing = { v, id: e.pointerId, snap: snapshot(), erased: false, last: [x, y] };
+      eraseAt(x, y);
+    } else {
+      drawing = { v, id: e.pointerId, stroke: {
+        tool, color: settings.color[tool], width: SIZES[tool][settings.size[tool]], points: [r1(x), r1(y), r2(pressure(e))],
+      } };
+    }
+    scheduleLive();
+  }
+  function onMove(e) {
+    if (!drawing || e.pointerId !== drawing.id) return;
+    const list = (e.getCoalescedEvents && e.getCoalescedEvents().length) ? e.getCoalescedEvents() : [e];
+    for (const ev of list) {
+      const [x, y] = toPage(drawing.v, ev);
+      if (drawing.stroke) {
+        const p = drawing.stroke.points, lx = p[p.length - 3], ly = p[p.length - 2];
+        if ((x - lx) ** 2 + (y - ly) ** 2 < 0.8) continue;
+        p.push(r1(x), r1(y), r2(pressure(ev)));
+      } else {
+        const [lx, ly] = drawing.last, r = SIZES.eraser[settings.size.eraser] / 2;
+        const steps = Math.max(1, Math.ceil(Math.hypot(x - lx, y - ly) / (r / 2)));
+        for (let k = 1; k <= steps; k++) eraseAt(lx + (x - lx) * k / steps, ly + (y - ly) * k / steps);
+        drawing.last = [x, y];
+      }
+    }
+    scheduleLive();
+  }
+  function onUp(e) {
+    if (!drawing || e.pointerId !== drawing.id) return;
+    const d = drawing; drawing = null;
+    if (d.stroke) {
+      pushHistory();
+      state.pages[d.v.i].strokes.push(d.stroke);
+      if (d.v.visible) { const s = d.v.canvas.width / PAGE_W; d.v.ctx.setTransform(s, 0, 0, s, 0, 0); drawStroke(d.v.ctx, d.stroke); }
+      scheduleSave();
+    } else if (d.erased) scheduleSave();
+    cancelAnimationFrame(liveRaf); liveRaf = 0; drawLive(); live.remove();
+  }
+
+  const bboxes = new WeakMap();
+  function bbox(st) {
+    let b = bboxes.get(st);
+    if (!b) {
+      b = [Infinity, Infinity, -Infinity, -Infinity];
+      const p = st.points;
+      for (let i = 0; i < p.length; i += 3) { b[0] = Math.min(b[0], p[i]); b[1] = Math.min(b[1], p[i+1]); b[2] = Math.max(b[2], p[i]); b[3] = Math.max(b[3], p[i+1]); }
+      bboxes.set(st, b);
+    }
+    return b;
+  }
+  function segDist2(x, y, ax, ay, bx, by) {
+    const dx = bx - ax, dy = by - ay, l = dx * dx + dy * dy;
+    let t = l ? ((x - ax) * dx + (y - ay) * dy) / l : 0; t = Math.max(0, Math.min(1, t));
+    const cx = ax + t * dx - x, cy = ay + t * dy - y; return cx * cx + cy * cy;
+  }
+  function hit(st, x, y, r) {
+    const tol = r + st.width * (st.tool === 'hl' ? 0.5 : 0.8), b = bbox(st);
+    if (x < b[0] - tol || x > b[2] + tol || y < b[1] - tol || y > b[3] + tol) return false;
+    const p = st.points, t2 = tol * tol;
+    if (p.length === 3) return (x - p[0]) ** 2 + (y - p[1]) ** 2 <= t2;
+    for (let i = 3; i < p.length; i += 3) if (segDist2(x, y, p[i-3], p[i-2], p[i], p[i+1]) <= t2) return true;
+    return false;
+  }
+  function eraseAt(x, y) {
+    const page = state.pages[drawing.v.i], r = SIZES.eraser[settings.size.eraser] / 2;
+    const keep = page.strokes.filter(st => !hit(st, x, y, r));
+    if (keep.length !== page.strokes.length) {
+      if (!drawing.erased) { pushHistory(drawing.snap); drawing.erased = true; }
+      page.strokes = keep; render(drawing.v);
+    }
+  }
+
+  // ---------- Werkzeugleiste ----------
+  function buildToolUI() {
+    document.querySelectorAll('[data-tool]').forEach(b => b.setAttribute('aria-pressed', b.dataset.tool === settings.tool));
+    const t = settings.tool;
+    const sw = $('#swatches'); sw.innerHTML = '';
+    sw.style.display = t === 'eraser' ? 'none' : '';
+    sw.previousElementSibling.style.display = sw.style.display;
+    if (t !== 'eraser') {
+      for (const c of PALETTE[t]) {
+        const b = document.createElement('button'); b.className = 'sw'; b.style.background = c; b.title = c;
+        b.setAttribute('aria-pressed', settings.color[t].toLowerCase() === c);
+        b.onclick = () => { settings.color[t] = c; saveSettings(); buildToolUI(); };
+        sw.append(b);
+      }
+      const custom = document.createElement('label'); custom.className = 'sw custom'; custom.title = 'Eigene Farbe';
+      const isCustom = !PALETTE[t].includes(settings.color[t].toLowerCase());
+      custom.setAttribute('aria-pressed', isCustom);
+      if (isCustom) custom.style.background = settings.color[t];
+      const inp = document.createElement('input'); inp.type = 'color'; inp.value = settings.color[t];
+      inp.oninput = () => { settings.color[t] = inp.value; custom.style.background = inp.value; };
+      inp.onchange = () => { saveSettings(); buildToolUI(); };
+      custom.append(inp); sw.append(custom);
+    }
+    const sz = $('#sizes'); sz.innerHTML = '';
+    SIZES[t].forEach((w, i) => {
+      const b = document.createElement('button'); b.className = 'tb size'; b.title = ['Fein', 'Mittel', 'Dick'][i];
+      b.setAttribute('aria-pressed', settings.size[t] === i);
+      const dot = document.createElement('i'); const d = [5, 9, 14][i];
+      dot.style.width = dot.style.height = d + 'px';
+      b.append(dot);
+      b.onclick = () => { settings.size[t] = i; saveSettings(); buildToolUI(); };
+      sz.append(b);
+    });
+    $('#penOnly').setAttribute('aria-pressed', settings.penOnly);
+    document.body.classList.toggle('penonly', settings.penOnly);
+  }
+  function setTool(t) { settings.tool = t; saveSettings(); buildToolUI(); }
+  document.querySelectorAll('[data-tool]').forEach(b => b.onclick = () => setTool(b.dataset.tool));
+  $('#undo').onclick = undo;
+  $('#redo').onclick = redo;
+  $('#zoomIn').onclick = () => setZoom(settings.zoom * 1.25);
+  $('#zoomOut').onclick = () => setZoom(settings.zoom / 1.25);
+  $('#zoomLabel').onclick = () => setZoom(1);
+  $('#penOnly').onclick = () => {
+    settings.penOnly = !settings.penOnly; saveSettings(); buildToolUI();
+    toast(settings.penOnly ? 'Nur Stift schreibt – Finger scrollen' : 'Finger und Stift schreiben');
+  };
+  $('#paper').onchange = e => {
+    pushHistory();
+    state.pages[current].paper = e.target.value;
+    render(views[current]); scheduleSave();
+  };
+  $('#addPage').onclick = () => {
+    pushHistory();
+    state.pages.splice(current + 1, 0, newPage(state.pages[current].paper));
+    syncPages(); scheduleSave();
+    setCurrent(current + 1);
+    views[current].el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+  $('#delPage').onclick = () => {
+    if (state.pages.length <= 1) return;
+    if (state.pages[current].strokes.length && !confirm(`Seite ${current + 1} löschen?`)) return;
+    pushHistory();
+    state.pages.splice(current, 1);
+    current = Math.min(current, state.pages.length - 1);
+    syncPages(); scheduleSave(); toast('Seite gelöscht – Rückgängig möglich');
+  };
+
+  addEventListener('keydown', e => {
+    if (e.target.closest('input, select, dialog')) return;
+    const mod = e.metaKey || e.ctrlKey, k = e.key.toLowerCase();
+    if (mod && k === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
+    else if (mod && k === 'y') { e.preventDefault(); redo(); }
+    else if (!mod && k === 'p') setTool('pen');
+    else if (!mod && k === 'h') setTool('hl');
+    else if (!mod && k === 'e') setTool('eraser');
+    else if (mod && (k === '=' || k === '+')) { e.preventDefault(); setZoom(settings.zoom * 1.25); }
+    else if (mod && k === '-') { e.preventDefault(); setZoom(settings.zoom / 1.25); }
+  });
+  // Trackpad-Pinch (ctrl+wheel) zoomt die Seiten statt der ganzen Seite
+  scroller.addEventListener('wheel', e => { if (e.ctrlKey) { e.preventDefault(); setZoom(settings.zoom * Math.exp(-e.deltaY / 200)); } }, { passive: false });
+
+  // ---------- Menü ----------
+  const menu = $('#menu');
+  function closeMenu() { menu.classList.remove('open'); }
+  $('#menuBtn').onclick = e => { e.stopPropagation(); menu.classList.toggle('open'); };
+  addEventListener('pointerdown', e => { if (!e.target.closest('#menu, #menuBtn')) closeMenu(); });
+  menu.onclick = e => {
+    const act = e.target.closest('button')?.dataset.act; if (!act) return;
+    closeMenu(); actions[act]();
+  };
+
+  const baseUrl = () => location.origin + location.pathname;
+  const actions = {
+    newNotebook() {
+      const id = Array.from(crypto.getRandomValues(new Uint8Array(6)), b => b.toString(36).padStart(2, '0')).join('').slice(0, 10);
+      $('#curLink').value = baseUrl() + '?id=' + NB_ID;
+      $('#newLink').value = baseUrl() + '?id=' + id;
+      $('#linkDlg').showModal();
+    },
+    openTab() { window.open(location.href, '_blank', 'noopener'); },
+    async png() {
+      const blob = await pageBlob(state.pages[current], 2);
+      download(blob, `notiz-${NB_ID}-seite-${current + 1}.png`);
+    },
+    async pdf() {
+      const box = $('#print'); box.innerHTML = '';
+      for (const page of state.pages) {
+        const img = new Image(); img.src = URL.createObjectURL(await pageBlob(page, 1.6)); box.append(img);
+      }
+      await Promise.all([...box.querySelectorAll('img')].map(i => i.decode().catch(() => {})));
+      window.print();
+    },
+    backup() {
+      download(new Blob([JSON.stringify(state)], { type: 'application/json' }), `notizbuch-${NB_ID}.json`);
+    },
+    restore() { $('#fileIn').click(); },
+    clearPage() {
+      if (!state.pages[current].strokes.length) return;
+      pushHistory(); state.pages[current].strokes = []; render(views[current]); scheduleSave();
+      toast('Seite geleert – Rückgängig möglich');
+    },
+  };
+  function pageBlob(page, scale) {
+    const c = document.createElement('canvas'); c.width = PAGE_W * scale; c.height = PAGE_H * scale;
+    renderPage(c.getContext('2d'), page, scale);
+    return new Promise(res => c.toBlob(res, 'image/png'));
+  }
+  function download(blob, name) {
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
+    document.body.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  }
+  $('#fileIn').onchange = async e => {
+    const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+    try {
+      const data = JSON.parse(await f.text());
+      if (!valid(data)) throw new Error('Ungültiges Format');
+      pushHistory(); state = data; current = 0; syncPages(); scheduleSave(); toast('Backup importiert');
+    } catch (err) { toast('Import fehlgeschlagen: ' + err.message); }
+  };
+  $('#closeDlg').onclick = () => $('#linkDlg').close();
+  document.querySelectorAll('[data-copy]').forEach(b => b.onclick = async () => {
+    const inp = $('#' + b.dataset.copy);
+    try { await navigator.clipboard.writeText(inp.value); toast('Link kopiert'); }
+    catch { inp.select(); document.execCommand('copy') ? toast('Link kopiert') : toast('Bitte manuell kopieren'); }
+  });
+
+  let toastTimer;
+  function toast(msg) {
+    const t = $('#toast'); t.textContent = msg; t.classList.add('show');
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 2200);
+  }
+
+  // ---------- Start ----------
+  buildToolUI(); updateHistoryBtns(); syncPages();
+  store.get(KEY).then(data => { if (valid(data) && !undoStack.length) { state = data; syncPages(); } });
+  if (navigator.storage?.persist) navigator.storage.persist().catch(() => {});
+})();
+</script>
+</body>
+</html>
