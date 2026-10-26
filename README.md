@@ -10,21 +10,21 @@ Handschriftliche Notizen im Stil von GoodNotes/OneNote – als einzelne HTML-Sei
 2. `index.html` und `.nojekyll` hochladen (*Add file → Upload files*), committen.
 3. *Settings → Pages → Build and deployment*: Source **Deploy from a branch**, Branch **main**, Ordner **/ (root)** → *Save*.
 4. Nach ca. einer Minute ist die Seite erreichbar unter
-   `https://<dein-github-name>.github.io/ink-notes/`
+   `https://maxiheid.github.io/ink-notes/`
 
 Oder per Terminal:
 
 ```bash
 git init && git add index.html .nojekyll README.md && git commit -m "Ink Notes"
 git branch -M main
-git remote add origin https://github.com/<dein-github-name>/ink-notes.git
+git remote add origin https://github.com/maxiheid/ink-notes.git
 git push -u origin main
 ```
 
 ## 2. In Notion einbetten
 
 1. In Notion `/embed` tippen, den Link einfügen:
-   `https://<dein-github-name>.github.io/ink-notes/?id=mathe`
+   `https://maxiheid.github.io/ink-notes/?id=mathe`
 2. Den Embed-Block unten am Rand auf die gewünschte Höhe ziehen.
 
 **Jede `?id=` ist ein eigenes Notizbuch.** Für jede Notion-Seite eine andere id verwenden (`?id=mathe`, `?id=meeting-2026-10-26`, …). Im Menü (⋯) → *Neues Notizbuch / Embed-Link* erzeugt einen zufälligen Link zum Kopieren.
