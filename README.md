@@ -2,7 +2,7 @@
 
 Handschriftliche Notizen im Stil von GoodNotes/OneNote – als einzelne HTML-Seite, gehostet über GitHub Pages, in Notion einbettbar und über Firebase zwischen allen Geräten synchronisiert.
 
-**Funktionen:** Stift mit Druckempfindlichkeit (Apple Pencil / Stylus), Textmarker, Radierer (auch über die Stylus-Radiertaste), Farben, drei Strichstärken, liniertes / kariertes / gepunktetes / leeres Papier, mehrere A4-Seiten, Rückgängig/Wiederholen, Zoom, „Nur Stift“-Modus (Apple Pencil schreibt, zwei Finger scrollen und zoomen, Handballen wird ignoriert), Export als PNG oder PDF, Backup als JSON.
+**Funktionen:** Stift mit Druckempfindlichkeit (Apple Pencil / Stylus), Textmarker, Radierer (auch über die Stylus-Radiertaste), Farben, drei Strichstärken, liniertes / kariertes / gepunktetes / leeres Papier, mehrere A4-Seiten, Rückgängig/Wiederholen, Zoom, Touch wie bei GoodNotes (ein Finger scrollt, zwei Finger zoomen, nur der Stift schreibt, Handballen wird ignoriert), Export als PNG oder PDF, Backup als JSON.
 
 ## 1. Auf GitHub Pages veröffentlichen
 
@@ -79,4 +79,4 @@ Die kostenlose Stufe (50.000 Lesevorgänge und 20.000 Schreibvorgänge pro Tag) 
 | Stift / Textmarker / Radierer | `P` / `H` / `E` |
 | Rückgängig / Wiederholen | `⌘Z` / `⇧⌘Z` (Windows: `Strg`) |
 | Zoom | `⌘+` / `⌘−`, Trackpad-Pinch, Klick auf % = einpassen |
-| iPad: nur Apple Pencil schreibt, zwei Finger scrollen/zoomen | schaltet sich beim ersten Pencil-Strich automatisch ein; manuell über das Hand-Symbol |
+| iPad / Touch | ein Finger scrollt, zwei Finger zoomen, nur Apple Pencil (bzw. Maus) schreibt |

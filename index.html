@@ -84,13 +84,12 @@
   .sync[data-s="ok"] { background: #22a35a; opacity: 1; }
   .sync[data-s="saving"], .sync[data-s="offline"] { background: #e8a317; opacity: 1; }
   .sync[data-s="error"] { background: #d93025; opacity: 1; }
-  #scroller { flex: 1; overflow: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
+  #scroller { flex: 1; overflow: auto; touch-action: none; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
   #pages { width: max-content; min-width: 100%; padding: 12px 12px 40px; }
   .page {
     position: relative; margin: 0 auto 14px; background: #fff; box-shadow: var(--shadow);
     border-radius: 2px; touch-action: none; cursor: crosshair;
   }
-  body.penonly #scroller { touch-action: none; }
   .page canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
   .page .num { position: absolute; right: 10px; bottom: 8px; font-size: 11px; color: #9aa1ab; pointer-events: none; }
 
@@ -177,7 +176,6 @@
   </div>
   <div class="sep"></div>
   <div class="grp">
-    <button class="tb" id="penOnly" title="Nur Apple Pencil schreibt – mit zwei Fingern scrollen und zoomen"><svg viewBox="0 0 24 24"><path d="M18 11V6a2 2 0 0 0-4 0"/><path d="M14 10V4a2 2 0 0 0-4 0v2"/><path d="M10 10.5V6a2 2 0 0 0-4 0v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-6-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/></svg></button>
     <button class="tb" id="menuBtn" title="Mehr"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button>
   </div>
   <span class="pageind"><span class="sync" id="sync" data-s="wait" title="Lädt …"></span><span id="pageInd">1 / 1</span></span>
@@ -249,7 +247,7 @@
   // ---------- Einstellungen (pro Gerät) ----------
   const settings = Object.assign({
     tool: 'pen', color: { pen: PALETTE.pen[0], hl: PALETTE.hl[0] }, size: { pen: 1, hl: 1, eraser: 1 },
-    penOnly: false, penSeen: false, zoom: 1,
+    zoom: 1,
   }, readJSON('inknotes:settings'));
   function saveSettings() { try { localStorage.setItem('inknotes:settings', JSON.stringify(settings)); } catch {} }
   function readJSON(k) { try { return JSON.parse(localStorage.getItem(k)) || {}; } catch { return {}; } }
@@ -676,16 +674,10 @@
   }
 
   function onDown(v, e) {
-    // Erster Apple-Pencil-Kontakt → automatisch in den Nur-Stift-Modus (einmalig, danach gilt der Schalter)
-    if (e.pointerType === 'pen' && !settings.penSeen) {
-      settings.penSeen = true;
-      if (!settings.penOnly) { settings.penOnly = true; buildToolUI(); toast('Apple Pencil erkannt – mit zwei Fingern scrollen'); }
-      saveSettings();
-    }
-    if (drawing || !ready) return;
-    if (e.pointerType === 'touch' && settings.penOnly) return;
+    if (drawing || !ready || e.pointerType === 'touch') return; // Finger scrollen/zoomen nur
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     e.preventDefault();
+    cancelTouch(); // Handballen, der schon scrollt, stoppen
     closeMenu();
     setCurrent(v.i);
     try { v.el.setPointerCapture(e.pointerId); } catch {}
@@ -733,50 +725,59 @@
     if (rebuildPending) { rebuildPending = false; requestRebuild(); }
   }
 
-  // ---------- Zwei-Finger-Scrollen und -Zoomen (Nur-Stift-Modus) ----------
-  // Ein einzelner Finger bzw. der Handballen bewirkt nichts.
+  // ---------- Touch: ein Finger scrollt, zwei Finger zoomen ----------
+  // Finger schreiben nie – nur Stift und Maus. Sobald der Stift schreibt, wird der Handballen ignoriert.
   const touches = new Map();
   let gesture = null, inertiaRaf = 0;
-  function midDist() {
-    const [a, b] = touches.values();
-    return [(a.x + b.x) / 2, (a.y + b.y) / 2, Math.hypot(a.x - b.x, a.y - b.y)];
+  function startGesture(t) {
+    const pts = [...touches.values()];
+    if (pts.length === 1) { gesture = { mode: 'pan', lx: pts[0].x, ly: pts[0].y, t, vx: 0, vy: 0 }; return; }
+    const [a, b] = pts, r = scroller.getBoundingClientRect(), mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+    gesture = {
+      mode: 'pinch', d0: Math.max(Math.hypot(a.x - b.x, a.y - b.y), 1), z0: settings.zoom, w0: cssW,
+      cx: scroller.scrollLeft + mx - r.left, cy: scroller.scrollTop + my - r.top,
+    };
   }
-  scroller.addEventListener('touchstart', e => { if (settings.penOnly) e.preventDefault(); }, { passive: false });
+  // Nach dem Pinch die Seiten in der neuen Größe scharf zeichnen
+  function endPinch(g) { if (g?.mode === 'pinch' && settings.zoom !== g.z0) { saveSettings(); layout(); } }
+  function cancelTouch() { endPinch(gesture); touches.clear(); gesture = null; cancelAnimationFrame(inertiaRaf); }
+
+  scroller.addEventListener('touchstart', e => e.preventDefault(), { passive: false });
   scroller.addEventListener('pointerdown', e => {
-    if (e.pointerType !== 'touch' || !settings.penOnly) return;
-    touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (e.pointerType !== 'touch' || drawing) return;
     cancelAnimationFrame(inertiaRaf);
-    if (touches.size === 2 && !drawing) {
-      const [mx, my, d] = midDist(), r = scroller.getBoundingClientRect();
-      gesture = {
-        d0: Math.max(d, 1), z0: settings.zoom, w0: cssW, zoomed: false,
-        cx: scroller.scrollLeft + mx - r.left, cy: scroller.scrollTop + my - r.top,
-        lx: mx, ly: my, t: e.timeStamp, vx: 0, vy: 0,
-      };
-    }
+    touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (touches.size <= 2) { endPinch(gesture); startGesture(e.timeStamp); }
   });
   scroller.addEventListener('pointermove', e => {
-    const t = touches.get(e.pointerId); if (!t) return;
+    const t = touches.get(e.pointerId); if (!t || !gesture) return;
     t.x = e.clientX; t.y = e.clientY;
-    if (!gesture || touches.size < 2) return;
-    const [mx, my, d] = midDist(), r = scroller.getBoundingClientRect(), g = gesture;
-    // Erst ab spürbarer Abstandsänderung zoomen, sonst nur verschieben
-    if (!g.zoomed && Math.abs(d / g.d0 - 1) > 0.08) { g.zoomed = true; g.d0 = d; }
-    const z = g.zoomed ? clampZoom(g.z0 * d / g.d0) : g.z0;
+    const g = gesture;
+    if (g.mode === 'pan') {
+      scroller.scrollLeft += g.lx - t.x; scroller.scrollTop += g.ly - t.y;
+      const dt = Math.max(1, e.timeStamp - g.t);
+      g.vx = 0.7 * g.vx + 0.3 * (g.lx - t.x) / dt; g.vy = 0.7 * g.vy + 0.3 * (g.ly - t.y) / dt;
+      g.lx = t.x; g.ly = t.y; g.t = e.timeStamp;
+      return;
+    }
+    const [a, b] = touches.values(), r = scroller.getBoundingClientRect();
+    const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+    const z = clampZoom(g.z0 * Math.hypot(a.x - b.x, a.y - b.y) / g.d0);
     if (z !== settings.zoom) { settings.zoom = z; layout(true); $('#zoomLabel').textContent = Math.round(z * 100) + '%'; }
+    // Punkt zwischen den Fingern bleibt unter den Fingern
     const f = cssW / g.w0;
     scroller.scrollLeft = g.cx * f - (mx - r.left);
     scroller.scrollTop = g.cy * f - (my - r.top);
-    const dt = Math.max(1, e.timeStamp - g.t);
-    g.vx = 0.7 * g.vx + 0.3 * (g.lx - mx) / dt; g.vy = 0.7 * g.vy + 0.3 * (g.ly - my) / dt;
-    g.lx = mx; g.ly = my; g.t = e.timeStamp;
   });
   function endTouch(e) {
     if (!touches.delete(e.pointerId)) return;
-    if (gesture && touches.size < 2) {
-      const g = gesture; gesture = null;
-      if (settings.zoom !== g.z0) { saveSettings(); layout(); }
-      else inertia(g.vx, g.vy);
+    const g = gesture;
+    if (touches.size === 0) {
+      gesture = null;
+      if (g?.mode === 'pan' && e.timeStamp - g.t < 80) inertia(g.vx, g.vy);
+      endPinch(g);
+    } else if (touches.size === 1 && g?.mode === 'pinch') {
+      endPinch(g); startGesture(e.timeStamp); // mit dem verbleibenden Finger weiterscrollen
     }
   }
   scroller.addEventListener('pointerup', endTouch);
@@ -859,8 +860,6 @@
       b.onclick = () => { settings.size[t] = i; saveSettings(); buildToolUI(); };
       sz.append(b);
     });
-    $('#penOnly').setAttribute('aria-pressed', settings.penOnly);
-    document.body.classList.toggle('penonly', settings.penOnly);
   }
   function setTool(t) { settings.tool = t; saveSettings(); buildToolUI(); }
   document.querySelectorAll('[data-tool]').forEach(b => b.onclick = () => setTool(b.dataset.tool));
@@ -869,10 +868,6 @@
   $('#zoomIn').onclick = () => setZoom(settings.zoom * 1.25);
   $('#zoomOut').onclick = () => setZoom(settings.zoom / 1.25);
   $('#zoomLabel').onclick = () => setZoom(1);
-  $('#penOnly').onclick = () => {
-    settings.penOnly = !settings.penOnly; saveSettings(); buildToolUI();
-    toast(settings.penOnly ? 'Nur Stift schreibt – zwei Finger scrollen und zoomen' : 'Finger und Stift schreiben');
-  };
   $('#paper').onchange = e => {
     state.pages[current].paper = e.target.value;
     render(views[current]); commit();
